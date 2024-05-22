@@ -1,17 +1,17 @@
 from typing import Type
 import boto3
-from langchain_core.tools import BaseTool
-from pydantic.v1 import BaseModel, Field
+from langchain.tools import BaseTool
+from pydantic import BaseModel, Field
 import streamlit as st
 
 ## We will be suing Titan Embeddings Model To generate Embedding
-from langchain_community.embeddings import BedrockEmbeddings
+from langchain.embeddings.bedrock import BedrockEmbeddings
 from langchain.llms.bedrock import Bedrock
 from langchain.chat_models.bedrock import BedrockChat
 
 ## Data Ingestion
+from langchain.document_loaders import PyPDFDirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFDirectoryLoader
 
 # Vector Embedding And Vector Store
 from langchain.vectorstores import FAISS
@@ -20,10 +20,12 @@ from langchain.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
 from langchain.chains import RetrievalQA
 
-from langchain_experimental.graph_transformers import LLMGraphTransformer
-from langchain.agents.agent_toolkits import create_retriever_tool
-from langchain_core.utils.function_calling import convert_to_openai_tool
-from langchain.agents import AgentExecutor, OpenAIFunctionsAgent, tool
+from langchain_experimental.graph_transformers import (
+    LLMGraphTransformer,
+)
+
+from langchain.agents import initialize_agent, Tool, AgentType
+from langchain.chains.conversation.memory import ConversationBufferMemory
 
 import yfinance as yf
 
@@ -71,8 +73,11 @@ def get_mistral_llm():
     llm = Bedrock(
         model_id="mistral.mistral-7b-instruct-v0:2",
         client=bedrock,
-        model_kwargs={"max_tokens": 1000},
     )
+    llm.model_kwargs = {
+        "temperature": 0.3,
+        "max_tokens": 1000,
+    }
     return llm
 
 
@@ -156,25 +161,49 @@ def get_response_llm(llm, vectorstore_faiss, query):
 
 
 def configure_retriever():
-    docs = loader()
-    splitter = data_ingestion(docs)
-    vectorstore = FAISS.from_documents(splitter, bedrock_embeddings)
-    return vectorstore.as_retriever(search_kwargs={"k": 4})
+    bedrock_embeddings = BedrockEmbeddings(
+        model_id="amazon.titan-embed-image-v1", client=bedrock
+    )
+    vectorstore = FAISS.load_local(
+        "faiss_index", bedrock_embeddings, allow_dangerous_deserialization=True
+    )
+    return vectorstore
 
 
-latest_stock_price = convert_to_openai_tool(get_current_stock_price)
+latest_stock_price = CurrentStockPriceTool(
+    name="get_current_stock_price",
+    description="Get the latest stock price for a given ticker symbol.",
+)
 
 # print("init retriever tool")
-# retriever_tool = create_retriever_tool(
-#     configure_retriever(),
-#     "search_docs",
-#     "searches and returns documents and information from the documents",
-# )
-#
+
+
+def search_docs(query):
+    """Searches the document store for relevant information."""
+    vectorstore = configure_retriever()
+    print(f"query: {query['value']}")
+    results = vectorstore.similarity_search(query["value"])
+    return {"docs": results}
+
+
+retriever_tool = Tool(
+    name="search_docs",
+    func=search_docs,
+    description="Search the document store for relevant information.",
+)
+
 # print("init tools")
-# tools = [retriever_tool, latest_stock_price]
-# print("init openai functions")
-# agent = OpenAIFunctionsAgent(llm=get_mistral_llm(), tools=tools, prompt=PROMPT)
+tools = [retriever_tool, latest_stock_price]
+print("init openai functions")
+# llm = get_mistral_llm()
+llm = get_mistral_llm()
+agent = initialize_agent(
+    tools,
+    llm,
+    agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
+    memory=ConversationBufferMemory(),
+    verbose=True,
+)
 # print("init agent_executor")
 # agent_executor = AgentExecutor(
 #     agent=agent, tools=tools, verbose=True, return_intermediate_steps=True
@@ -205,26 +234,10 @@ def main():
                 get_vector_store(docs)
                 st.success("Done")
 
-    if st.button("Titan Output"):
+    if st.button("Run Agent"):
         with st.spinner("Processing..."):
-            faiss_index = FAISS.load_local(
-                "faiss_index", bedrock_embeddings, allow_dangerous_deserialization=True
-            )
-            llm = get_titan_llm()
-
-            # faiss_index = get_vector_store(docs)
-            st.write(get_response_llm(llm, faiss_index, user_question))
-            st.success("Done")
-
-    if st.button("Mistral Output"):
-        with st.spinner("Processing..."):
-            faiss_index = FAISS.load_local(
-                "faiss_index", bedrock_embeddings, allow_dangerous_deserialization=True
-            )
-            llm = get_mistral_llm()
-
-            # faiss_index = get_vector_store(docs)
-            st.write(get_response_llm(llm, faiss_index, user_question))
+            response = agent.invoke({"input": user_question})
+            st.write(response)
             st.success("Done")
 
 
