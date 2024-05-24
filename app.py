@@ -26,8 +26,13 @@ from langchain_experimental.graph_transformers import (
 
 from langchain.agents import initialize_agent, Tool, AgentType
 from langchain.chains.conversation.memory import ConversationBufferMemory
+from langchain_community.callbacks.streamlit import (
+    StreamlitCallbackHandler,
+)
 
 import yfinance as yf
+
+st_callback = StreamlitCallbackHandler(st.container())
 
 ## Bedrock Clients
 bedrock = boto3.client(service_name="bedrock-runtime")
@@ -181,8 +186,11 @@ latest_stock_price = CurrentStockPriceTool(
 def search_docs(query):
     """Searches the document store for relevant information."""
     vectorstore = configure_retriever()
-    print(f"query: {query['value']}")
-    results = vectorstore.similarity_search(query["value"])
+    print(f"query: {query}")
+    # if query["value"]:
+    #     results = vectorstore.similarity_search(query["value"])
+    # else:
+    results = vectorstore.similarity_search(query["query"])
     return {"docs": results}
 
 
@@ -219,7 +227,7 @@ agent = initialize_agent(
 
 
 def main():
-    st.set_page_config("Chat PDF")
+    # st.set_page_config("Chat PDF")
 
     st.header("Chat with PDF using AWS Bedrock💁")
 
@@ -236,8 +244,11 @@ def main():
 
     if st.button("Run Agent"):
         with st.spinner("Processing..."):
-            response = agent.invoke({"input": user_question})
-            st.write(response)
+            st_callback = StreamlitCallbackHandler(st.container())
+            response = agent.invoke(
+                {"input": user_question}, {"callbacks": [st_callback]}
+            )
+            st.write(response["output"])
             st.success("Done")
 
 
