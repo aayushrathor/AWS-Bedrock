@@ -29,7 +29,7 @@ from langchain.chains.conversation.memory import ConversationBufferMemory
 from langchain_community.callbacks.streamlit import (
     StreamlitCallbackHandler,
 )
-
+from langchain_core.documents import Document
 import yfinance as yf
 
 st_callback = StreamlitCallbackHandler(st.container())
@@ -86,6 +86,12 @@ def get_mistral_llm():
     return llm
 
 
+def get_llama_llm():
+    llm = Bedrock(model_id="meta.llama3-8b-instruct-v1:0", client=bedrock)
+    llm.model_kwargs = {"max_gen_len": 2048}
+    return llm
+
+
 def get_llm_transformer(llm):
     transformer = LLMGraphTransformer(llm=llm)
     return transformer
@@ -93,14 +99,21 @@ def get_llm_transformer(llm):
 
 def graph_documents(llm, docs):
     transformer = get_llm_transformer(llm)
-    print(f"\n\ntype of docs: {type(docs)}, length: {len(docs)}, docs: {docs[:3]}\n\n")
+    # text = """
+    # Marie Curie, born in 1867, was a Polish and naturalised-French physicist and chemist who conducted pioneering research on radioactivity.
+    # She was the first woman to win a Nobel Prize, the first person to win a Nobel Prize twice, and the only person to win a Nobel Prize in two scientific fields.
+    # Her husband, Pierre Curie, was a co-winner of her first Nobel Prize, making them the first-ever married couple to win the Nobel Prize and launching the Curie family legacy of five Nobel Prizes.
+    # She was, in 1906, the first woman to become a professor at the University of Paris.
+    # """
+    # documents = [Document(page_content=text)]
+    # graph_docs = transformer.convert_to_graph_documents(documents=documents)
     graph_docs = transformer.convert_to_graph_documents(documents=docs)
     print(f"Nodes; {graph_docs[0].nodes}")
     print(f"relationships; {graph_docs[0].relationships}")
     return graph_docs
 
 
-# llm = get_mistral_llm()
+# llm = get_llama_llm()
 # docs = loader()
 # graph_documents(llm, docs)
 
