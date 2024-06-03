@@ -31,6 +31,7 @@ from langchain_community.callbacks.streamlit import (
 )
 from langchain_core.documents import Document
 import yfinance as yf
+from langchain.chains import ConversationChain
 
 st_callback = StreamlitCallbackHandler(st.container())
 
@@ -159,6 +160,11 @@ Question: {question}
 
 Assistant:"""
 
+general_prompt = "You are an Intelligent AI Assistant.\n\nPrevious Conversation: {history}\n\nUser Question: {input}"
+GENERAL_PROMPT = PromptTemplate(
+    input_variables=["history", "input"], template=general_prompt
+)
+
 PROMPT = PromptTemplate(
     template=prompt_template, input_variables=["context", "question"]
 )
@@ -240,11 +246,15 @@ agent = initialize_agent(
 
 
 def main():
-    # st.set_page_config("Chat PDF")
-
     st.header("Chat with PDF using AWS Bedrock💁")
 
-    user_question = st.text_input("Ask a Question from the PDF Files")
+    with st.expander("Generate Context"):
+        context_question = st.text_input("Enter a question to generate context")
+        generate_context_button = st.button("Generate Context")
+
+    with st.expander("Ask Agent"):
+        agent_question = st.text_input("Enter a question for the agent")
+        run_agent_button = st.button("Run Agent")
 
     with st.sidebar:
         st.title("Update Or Create Vector Store:")
@@ -255,14 +265,27 @@ def main():
                 get_vector_store(docs)
                 st.success("Done")
 
-    if st.button("Run Agent"):
-        with st.spinner("Processing..."):
-            st_callback = StreamlitCallbackHandler(st.container())
-            response = agent.invoke(
-                {"input": user_question}, {"callbacks": [st_callback]}
-            )
-            st.write(response["output"])
-            st.success("Done")
+    context = None
+    if generate_context_button:
+        with st.spinner("Generating context..."):
+            llm = get_mistral_llm()
+            chain = ConversationChain(llm=llm, prompt=GENERAL_PROMPT)
+            context = chain.predict(input=context_question)
+            st.write("Context: ")
+            st.write(context)
+
+    if run_agent_button:
+        if context_question:
+            with st.spinner("Processing..."):
+                st_callback = StreamlitCallbackHandler(st.container())
+                response = agent.invoke(
+                    {"input": agent_question.join(f"\n\ncontext: {context}")},
+                    {"callbacks": [st_callback]},
+                )
+                st.write(response["output"])
+                st.success("Done")
+        else:
+            st.error("Please generate context first!")
 
 
 if __name__ == "__main__":
